@@ -2,7 +2,7 @@
 
 ## 1. Visión General
 
-El `google_srg_plugin` es un motor de reconocimiento de voz para la plataforma UniMRCP. Permite a las aplicaciones que utilizan UniMRCP (como Asterisk con `chan_unimrcp`) emplear los potentes servicios de Google Cloud Speech-to-Text (STT) para convertir audio en texto.
+El `google_srg_plugin` es un motor de reconocimiento de voz para la plataforma UniMRCP. Permite a las aplicaciones que utilizan UniMRCP (como Asterisk con `asterisk-unimrcp`) emplear los potentes servicios de Google Cloud Speech-to-Text (STT) para convertir audio en texto.
 
 Este plugin interactúa con la API de Google Cloud STT utilizando las bibliotecas cliente oficiales de Google Cloud C++ a través de gRPC, lo que permite un streaming de audio eficiente y reconocimiento en tiempo real.
 
@@ -234,101 +234,135 @@ Para que los clientes MRCP puedan usar este motor, debes asociarlo con un perfil
 ```
 El `name` del perfil (ej., "GoogleSTT-MRCPv2-Profile") es importante, ya que será usado por los clientes MRCP (como Asterisk) para seleccionar esta configuración.
 
-## 6. Configuración de Asterisk (con `chan_unimrcp`)
+## 6. Configuración de Asterisk (con `asterisk-unimrcp` / `res_speech_unimrcp`)
 
-Para usar el plugin desde Asterisk a través de `chan_unimrcp`:
+Para utilizar el plugin `google_srg_plugin` desde Asterisk, necesitarás el módulo `asterisk-unimrcp` (que proporciona `res_speech_unimrcp.so`) instalado y configurado en tu sistema Asterisk. Este módulo actúa como un conector entre la API de Reconocimiento de Voz Genérica de Asterisk (Generic Speech API) y el servidor UniMRCP.
 
-### 6.1. `mrcp.conf`
-Configura `chan_unimrcp` en Asterisk editando `/etc/asterisk/mrcp.conf`:
+### 6.1. Prerrequisito: `asterisk-unimrcp`
+Asegúrate de tener `asterisk-unimrcp` compilado e instalado en tu sistema Asterisk. Puedes obtenerlo desde el [repositorio oficial de `asterisk-unimrcp`](https://github.com/unispeech/asterisk-unimrcp) o desde el gestor de paquetes de tu distribución si está disponible.
+
+### 6.2. Configuración de `unimrcp.conf` (Asterisk)
+Este archivo, usualmente ubicado en `/etc/asterisk/unimrcp.conf`, configura cómo Asterisk (específicamente `res_speech_unimrcp.so`) se comunica con el servidor UniMRCP.
+
+Define un perfil de cliente que apunte a tu servidor UniMRCP y especifique el perfil del servidor UniMRCP que utiliza el motor `googlesrg`.
 
 ```ini
+; unimrcp.conf (en el directorio de configuración de Asterisk)
+
 [general]
-; Define un perfil por defecto si lo deseas
-default-mrcpv2-profile = UniMRCP-Google-STT
-; default-mrcpv1-profile = MyV1Profile
+; Nombre del perfil de servidor UniMRCP por defecto a usar.
+; Este nombre DEBE coincidir con un perfil definido abajo.
+default-server-profile = MyUniMRCPServerProfile
 
-; Ruta al archivo de configuración del stack cliente de UniMRCP (opcional si los defaults son correctos)
-; unimrcp-config-file = /etc/unimrcp.conf 
+; Nivel de log para el conector UniMRCP en Asterisk (opcional)
+; log-level = NOTICE ; O DEBUG, WARNING, ERROR
 
-[UniMRCP-Google-STT] ; Nombre del perfil para Asterisk
+; Versión de MRCP a usar por defecto (1 o 2)
+; mrcp-version = 2
+
+[MyUniMRCPServerProfile] ; Nombre de este perfil de cliente UniMRCP
 ; Dirección IP del servidor UniMRCP
-server-ip = 127.0.0.1 ; O la IP donde corre UniMRCP
-; Puerto del servidor UniMRCP (generalmente 8060 para RTSP/TCP por defecto)
+server-ip = 127.0.0.1 ; O la IP donde corre tu servidor UniMRCP
+; Puerto RTSP del servidor UniMRCP (usualmente 8060)
 server-port = 8060
-; Versión de MRCP a usar (1 o 2)
-mrcp-version = 2
 
-; IMPORTANTE: Este es el nombre del perfil definido en unimrcpserver.xml
-speechrecog = GoogleSTT-MRCPv2-Profile 
-; speechsynth = MySynthProfile ; Si también usas TTS
+; IMPORTANTE: Nombre del perfil MRCPv2 (o MRCPv1) definido en unimrcpserver.xml
+; Este perfil en unimrcpserver.xml debe estar configurado para usar el motor "GoogleSRG1"
+default-recognizer-profile = GoogleSTT-MRCPv2-Profile 
+; default-synthesizer-profile = MySynthProfile ; Si también usas TTS
 
-; Opcional: timeouts, configuración SIP, etc.
-; rtptimeout = 5000 ; Timeout RTP en ms
-; connecttimeout = 5000 ; Timeout de conexión en ms
+; Opcional: otros parámetros como timeouts, configuración SIP específica si usas SIP en lugar de RTSP.
+; rtp-port-min = 10000
+; rtp-port-max = 10100
 ```
-*   **`UniMRCP-Google-STT`**: Es un nombre que eliges para este perfil dentro de Asterisk.
-*   **`server-ip`**: La IP donde se ejecuta tu servidor UniMRCP.
-*   **`server-port`**: El puerto RTSP de tu servidor UniMRCP (usualmente 8060).
-*   **`speechrecog`**: Debe coincidir EXACTAMENTE con el `name` del perfil que definiste en `unimrcpserver.xml` y que usa el motor `googlesrg`.
 
-### 6.2. Ejemplo de Dialplan de Asterisk (`extensions.conf`)
+**Puntos Clave:**
+*   **`default-server-profile`**: Especifica el nombre del perfil de cliente (`[MyUniMRCPServerProfile]`) a usar.
+*   **`server-ip` / `server-port`**: Deben apuntar a tu servidor UniMRCP en ejecución.
+*   **`default-recognizer-profile`**: Es crucial. Debe coincidir **exactamente** con el `name` del perfil (ej. "GoogleSTT-MRCPv2-Profile") que definiste en `unimrcpserver.xml` (ver Sección 5.2). Este perfil en `unimrcpserver.xml` es el que está configurado para usar el motor `GoogleSRG1` (que a su vez usa `googlesrg.so`).
+
+### 6.3. Configuración de `speech.conf` (Asterisk)
+Este archivo, usualmente en `/etc/asterisk/speech.conf`, configura el motor de reconocimiento de voz por defecto para la API Genérica de Voz de Asterisk.
+
+```ini
+; speech.conf (en el directorio de configuración de Asterisk)
+
+[general]
+; Establece UniMRCP como el motor de reconocimiento de voz por defecto.
+; El valor debe ser "unimrcp:<nombre-del-perfil-en-unimrcp.conf>"
+default_speech_recognition_engine = unimrcp:MyUniMRCPServerProfile
+; default_speech_synthesis_engine = unimrcp:MyUniMRCPServerProfile ; Si también usas TTS
+```
+
+**Puntos Clave:**
+*   `default_speech_recognition_engine`: Debe ser `unimrcp:` seguido del nombre del perfil que definiste en `unimrcp.conf` (ej. `MyUniMRCPServerProfile`).
+
+### 6.4. Ejemplo de Dialplan de Asterisk (`extensions.conf`)
+Una vez configurados `unimrcp.conf` y `speech.conf`, puedes usar las aplicaciones de la API Genérica de Voz en tu dialplan:
 
 ```dialplan
-exten => google_test,1,NoOp(Iniciando prueba de reconocimiento con Google STT via UniMRCP)
+exten => google_stt_test,1,NoOp(Iniciando prueba de reconocimiento con Google STT vía UniMRCP)
  same => n,Answer()
  same => n,Wait(1)
 
- ; Crear el recurso de reconocimiento usando el perfil de mrcp.conf
- same => n,SpeechCreate(UniMRCP-Google-STT)
- same => n,NoOp(Estado de SpeechCreate: ${SPEECH_STATUS})
- same => n,GotoIf($["${SPEECH_STATUS}" != "OK"]?speech_error)
+ ; Iniciar la sesión de reconocimiento de voz.
+ ; Si default_speech_recognition_engine está configurado en speech.conf,
+ ; no necesitas especificar el motor aquí.
+ ; Alternativamente, puedes especificarlo: SpeechCreate(unimrcp:MyUniMRCPServerProfile)
+ same => n,SpeechCreate() 
+ same => n,NoOp(Estado de SpeechCreate: ${SPEECH_STATUS(0)})
+ same => n,GotoIf($["${SPEECH_STATUS(0)}" != "OK"]?speech_error)
 
- ; Opcional: Pasar parámetros específicos para esta sesión de reconocimiento
- ; Establecer el idioma para esta sesión específica (sobrescribe el default del servidor)
- ; same => n,SpeechSet(SWI_language=es-ES)
- ; Habilitar resultados intermedios para esta sesión
- ; same => n,Set(RECOG_PARAMS=interim-results=true) ; La forma de pasar parámetros puede variar
+ ; Opcional: Establecer el idioma para esta sesión de reconocimiento.
+ ; Esto se enviará como la cabecera Speech-Language en MRCP.
+ same => n,Set(SPEECH_LANGUAGE()=es-ES) ; Ejemplo para español
+ ; same => n,Set(SPEECH_LANGUAGE()=en-GB) ; Ejemplo para inglés británico
 
- ; Iniciar reconocimiento. El audio de la llamada se enviará al motor.
- ; 't=7000' es un timeout de reconocimiento de 7 segundos.
- ; 'b=1' habilita barge-in (el usuario puede interrumpir el prompt).
- ; El argumento de SpeechRecognize() es un prompt que se reproduce si no hay barge-in.
- same => n,SpeechRecognize(Por favor, diga algo.,t=7000&b=1)
- same => n,NoOp(Estado de SpeechRecognize: ${SPEECH_STATUS})
- same => n,NoOp(Resultado del Reconocimiento: ${SPEECH_TEXT(0)})
+ ; Opcional: Intentar pasar parámetros específicos del proveedor.
+ ; La forma exacta puede depender de la versión de asterisk-unimrcp.
+ ; Esto podría enviarse como cabeceras MRCP.
+ ; same => n,Set(SPEECH_PARAMS(X-Google-Model)=telephony)
+ ; same => n,Set(SPEECH_PARAMS(X-Google-Interim-Results)=true)
+
+ ; Iniciar el reconocimiento.
+ ; SpeechRecognize(prompt_a_reproducir, timeout_en_ms, opciones)
+ ; El audio de la llamada actual se enviará al motor UniMRCP.
+ ; Si se especifica un prompt, se reproducirá y el reconocimiento comenzará después.
+ ; 'b' en opciones habilita barge-in.
+ same => n,SpeechRecognize(Por favor, diga algo después del tono.,5000,b)
+ same => n,NoOp(Estado de SpeechRecognize: ${SPEECH_STATUS(0)})
+ same => n,NoOp(Razón del estado: ${SPEECH_STATUS_REASON(0)})
+ same => n,GotoIf($["${SPEECH_STATUS(0)}" != "OK"]?speech_error)
+
+ same => n,NoOp(Texto Reconocido: ${SPEECH_TEXT(0)})
  same => n,NoOp(Confianza: ${SPEECH_CONFIDENCE(0)})
- same => n,NoOp(Gramática/Input Interpretado: ${SPEECH_GRAMMAR(0)})
+ same => n,NoOp(Gramática/Input (puede ser NLSML): ${SPEECH_GRAMMAR(0)})
 
- ; Destruir el recurso de reconocimiento
+ ; Destruir el recurso de reconocimiento de voz
  same => n,SpeechDestroy()
  same => n,Hangup()
 
-same => n(speech_error),NoOp(Error durante la operación de reconocimiento de voz)
+same => n(speech_error),NoOp(Error durante la operación de reconocimiento de voz: ${SPEECH_STATUS(0)} - ${SPEECH_STATUS_REASON(0)})
+ same => n,SpeechDestroy() ; Intenta limpiar incluso en caso de error
  same => n,Hangup()
 ```
+
+**Notas sobre el Dialplan:**
+*   `SpeechCreate()`: Inicia una sesión con el motor de voz. Si has configurado `default_speech_recognition_engine` en `speech.conf`, no necesitas pasar argumentos.
+*   `Set(SPEECH_LANGUAGE()=...)`: Te permite cambiar el idioma por solicitud. El plugin `google_srg_plugin` usará este valor si está presente.
+*   `Set(SPEECH_PARAMS(HeaderName)=valor)`: Podría usarse para enviar cabeceras MRCP específicas del proveedor si `asterisk-unimrcp` lo soporta adecuadamente para RECOGNIZE.
+*   `SpeechRecognize()`: Envía el audio al motor UniMRCP.
+*   Variables de Canal: `SPEECH_TEXT(0)`, `SPEECH_CONFIDENCE(0)`, `SPEECH_GRAMMAR(0)`, `SPEECH_STATUS(0)` y `SPEECH_STATUS_REASON(0)` se llenan con los resultados.
+
+Asegúrate de recargar la configuración de Asterisk (`core reload` o `dialplan reload`, `reload res_speech_unimrcp.so` si es necesario) después de realizar cambios en estos archivos.
 
 ## 7. Uso Avanzado
 
 *   **Cambio de Idioma en Tiempo de Ejecución:**
-    El idioma se puede especificar por llamada usando la aplicación `SpeechSet` en el dialplan de Asterisk antes de llamar a `SpeechRecognize`:
-    ```dialplan
-    same => n,SpeechSet(SWI_language=fr-FR)
-    ```
-    O mediante el envío de la cabecera `Speech-Language` en la solicitud MRCP RECOGNIZE.
+    Como se muestra en el dialplan, usa `Set(SPEECH_LANGUAGE()=xx-XX)` antes de `SpeechRecognize()`.
 
-*   **Resultados Intermedios por Solicitud:**
-    Puedes intentar habilitar/deshabilitar los resultados intermedios por solicitud enviando una cabecera específica del proveedor. El plugin `google_srg_plugin` podría buscar una cabecera como `X-Google-Interim-Results`:
-    ```dialplan
-    same => n,Set(RECOG_PARAMS=X-Google-Interim-Results=true) 
-    ; ... luego SpeechRecognize() ...
-    ```
-    Esto requiere que `chan_unimrcp` esté configurado para pasar `RECOG_PARAMS` como cabeceras MRCP.
-
-*   **Selección de Modelo por Solicitud:**
-    Similar a los resultados intermedios, podrías usar `RECOG_PARAMS` para una cabecera como `X-Google-Model`:
-    ```dialplan
-    same => n,Set(RECOG_PARAMS=X-Google-Model=telephony)
-    ```
+*   **Resultados Intermedios y Selección de Modelo por Solicitud:**
+    La capacidad de enviar cabeceras MRCP personalizadas como `X-Google-Interim-Results` o `X-Google-Model` usando `Set(SPEECH_PARAMS(HeaderName)=value)` depende de la versión y las capacidades de `asterisk-unimrcp`. Consulta su documentación. Si `asterisk-unimrcp` no lo soporta directamente, estas configuraciones se basarán en los valores por defecto del servidor UniMRCP.
 
 ## 8. Troubleshooting
 
